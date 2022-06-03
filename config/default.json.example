@@ -1,0 +1,4 @@
+{
+  "web3provider": "ws://localhost:8546",
+  "etherscan_key": "ETHERSCAN_API_KEY"
+}

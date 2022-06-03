@@ -1,0 +1,19 @@
+{
+  "name": "rocketpool_deploy_auditor",
+  "version": "0.0.1",
+  "description": "Ensures that all the calls to RocketStorage's setBool function are matched by deployed contracts from the guardian.",
+  "scripts": {
+    "test": "mocha"
+  },
+  "main": "npm test",
+  "author": "0xPatches.eth",
+  "license": "ISC",
+  "devDependencies": {
+    "chai": "^4.3.6",
+    "config": "^3.3.7",
+    "ethereumjs-util": "^7.1.4",
+    "etherscan-api": "^10.0.9",
+    "mocha": "^10.0.0",
+    "web3": "^1.7.3"
+  }
+}
