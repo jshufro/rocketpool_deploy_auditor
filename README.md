@@ -6,6 +6,12 @@ done to set `contract.exists` as specified in the [Rocket Pool deploy script](ht
 It requires a web3 provider (execution client) and an Etherscan api token.
 
 ## Setup
+Clone the repo:
+```
+git clone https://github.com/jshufro/rocketpool_deploy_auditor.git
+git submodule update --init
+```
+
 Create a config file:
 ```
 cp config/default.json.example config/default.json
