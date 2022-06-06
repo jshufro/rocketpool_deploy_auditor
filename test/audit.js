@@ -10,6 +10,7 @@ const etherscan = require('etherscan-api').init(etherscanApiKey)
 
 const deployer = '0x0ccf14983364a7735d369879603930afe10df21e';
 const rocketStorage = '0x1d8f8f00cfa6758d7bE78336684788Fb0ee0Fa46';
+const rocketDaoNodeTrusted = '0xb8e783882b11Ff4f6Cef3C501EA0f4b960152cc9';
 const casper = "0x00000000219ab540356cBB839Cbe05303d7705Fa";
 const minBlock = 12007727;
 
@@ -28,6 +29,7 @@ async function getTxsForAddr(address, currentBlockNumber) {
       }
 
       if (e.startsWith('No transactions found')) {
+        debug("No more txs to download");
         break;
       }
 
@@ -84,7 +86,8 @@ describe("Audit", function() {
   var rocketStorageTxs;
   it(`Should fetch all the setBool txs for rocketStorage from etherscan`, async function() {
     /* Get all the setBool transactions from etherscan */
-    rocketStorageTxs = await getTxsForAddr(rocketStorage, await web3.eth.getBlockNumber());
+    const block = await web3.eth.getBlockNumber();
+    rocketStorageTxs = await getTxsForAddr(rocketStorage, block);
 
     debug(`Found ${rocketStorageTxs.length} transactions`);
     const setBool = web3.utils.sha3("setBool(bytes32,bool)").slice(0,10);
@@ -181,79 +184,168 @@ describe("Audit", function() {
 
     const data = await response.json();
 
-    assert.equal(data.status, '1');
+    if (data.message != 'OK')
+      debug(data);
+
     assert.equal(data.message, 'OK');
+    assert.equal(data.status, '1');
 
     // For some reason, the json response is an illegal object '{{ }}'. Slice off the odd bits.
     debug(`Downloading ${addr}`)
-    return JSON.parse(data.result[0].SourceCode.slice(1,-1));
+    if (data.result[0].SourceCode.startsWith('{{')) {
+      return JSON.parse(data.result[0].SourceCode.slice(1,-1));
+    }
+
+    // If the response isn't json, it's the plain text source of the contract
+    return data.result[0].SourceCode;
   }
 
-  it('Should download the contract source for all addresses that setBool received, except casper, and match it to a rocketpool v1.0.0 contract', async function() {
-    // inferredSetBoolAddrs is identical to the etherscan list iff the penultimate test passed
-    var addrs = inferredSetBoolAddrs.filter(a => a != casper); 
+  // inferredSetBoolAddrs is identical to the etherscan list iff the penultimate test passed
+  var addrsToCheck = inferredSetBoolAddrs;
+  it('Should fetch all the bootstrapUpgrade txs for Rocket Pool: Trusted Node from etherscan', async function() {
+    /* Get all the setBool transactions from etherscan */
+    const block = await web3.eth.getBlockNumber();
+    upgradeTxs = await getTxsForAddr(rocketDaoNodeTrusted, block);
+
+    debug(`Found ${upgradeTxs.length} transactions`);
+    const bootstrapUpgrade = web3.utils.sha3("bootstrapUpgrade(string,string,string,address)").slice(0,10);
+    debug(`Filtering for inputs with ${bootstrapUpgrade}`);
+
+    const bootstrapUpgradeCalls = upgradeTxs.filter(tx => tx.input.startsWith(bootstrapUpgrade));
+    debug(`Found ${bootstrapUpgradeCalls.length} calls to bootstrapUpgrade`);
+    assert(bootstrapUpgrade.length > 0);
+
+    const upgradeAddrs = new Set();
+    for (tx of bootstrapUpgradeCalls) {
+      const start = 10 + 64 * 3; // Beginning of the 4th parameter
+      const addr = tx.input.slice(start + 24, start + 24 + 40);
+
+      // Filter out txs with no new address
+      if (addr == "0".repeat(40)) {
+        continue;
+      }
+
+      debug(`Upgrade found with new contract at address ${addr}`);
+      upgradeAddrs.add("0x"+addr);
+    }
+    addrsToCheck.push(... Array.from(upgradeAddrs));
+  });
+
+  var toVerify = [];
+  it('Should download the contract source for all addresses that setBool received, except casper', async function() {
+    var addrs = addrsToCheck.filter(a => a != casper); 
 
     debug(`Found ${addrs.length} contracts to validate`);
 
     // Download contract source code from etherscan for all contracts.
     var contracts = [];
     for (addr of addrs) {
-      if (["0xdc9c66155667578179ed82bd17e725aba9dacd09",
-           "0xfc1a4a1eaf9e80fa5380ce45d9d12bdf7a81ca18",
-           "0x0444bc6fd57f157406d393570520d0472cafdfc4"].includes(addr)) {
-        debug(`Skipping ${addr}`);
-        continue; //TODO What is this contract???
-      }
 
       if (["0x6a032a901f17227b4db52937fb25f2523a529760"].includes(addr)) {
         debug(`Skipping ${addr}`);
         continue; //TODO Why is the source code different? 72 hours vs 5760 blocks in RocketDAOProtocolSettingsMinipool
       }
 
+      if (["0xb4efd85c19999d84251304bda99e90b92300bd93"].includes(addr)) {
+        debug(`Skipping ${addr}`);
+        continue; //TODO Whither the OldRPL source? Do we care?
+      }
+
       contracts.push({ 'addr': addr, 'resp': await getContractCode(addr)});
     }
 
     debug(`Downloaded ${Object.keys(contracts).length} contracts`)
-
-    // Verify that each contracts entry has a sources array comprised of dependencies _or_ v1.0.0 contracts.
-    var toVerify = [];
+    const skip = new Set(['@openzeppelin']);
     for (contract of contracts) {
+      if (contract.resp.sources == undefined) {
+        debug(contract);
+      }
       for (path of Object.keys(contract.resp.sources)) {
+        if (skip.has(path.split("/")[0])) {
+          debug(`Skipping ${path}`);
+          continue;
+        }
         toVerify.push({ 'addr': contract.addr, 'path': path, 'code': contract.resp.sources[path].content });
       }
     }
+  });
 
-    // Etherscan code has a header that is absent from github code. It is all comments, and a copy is in header.txt
-    const header = fs.readFileSync('header.txt').toString();
-    // There's a different header for Eth 2.0 contracts
-    const header2 = fs.readFileSync('header2.txt').toString();
-
-    const skip = new Set(['@openzeppelin']);
-    const prefix = "rocketpool"; // Path prefix of submodule
-    var files = {}
-    for (item of toVerify) {
-      if (skip.has(item.path.split("/")[0])) {
-        debug(`Skipping verification of ${item.path}`)
-        continue;
-      }
-
-      if (files[item.path] == undefined) {
-        files[item.path] = fs.readFileSync(`${prefix}${item.path}`).toString();
-      }
-
-      // Convert CR to LF
-      var etherscanCode = item.code.replace(/\r\n/g, '\n')
-
-      // Trim the headers from the etherscan result before comparing.
-      debug(`Starts with header ${etherscanCode.startsWith(header)}`);
-      etherscanCode = etherscanCode.replace(header, "");
-      debug(`Starts with header2 ${etherscanCode.startsWith(header2)}`);
-      etherscanCode = etherscanCode.replace(header2, "");
-
-      debug(`Verifying ${item.path} at ${item.addr}`)
-      assert.equal(files[item.path], etherscanCode);
+  var header;
+  var header2;
+  function removeHeadersAndCRLF(code) {
+    if (header == undefined) {
+      // Etherscan code has a header that is absent from github code. It is all comments, and a copy is in header.txt
+      header = fs.readFileSync('header.txt').toString();
+      // There's a different header for Eth 2.0 contracts
+      header2 = fs.readFileSync('header2.txt').toString();
     }
 
+    // Convert CR to LF
+    var code = code.replace(/\r\n/g, '\n')
+
+    // Trim the headers from the etherscan result before comparing.
+    code = code.replace(header, "");
+    code = code.replace(header2, "");
+
+    return code;
+  }
+
+  function getUnverified(toVerify, files) {
+    var mismatched = [];
+    for (item of toVerify) {
+      var etherscanCode = removeHeadersAndCRLF(item.code);
+
+      debug(`Verifying ${item.path} at ${item.addr}`)
+      if (files[item.path] != etherscanCode) {
+        mismatched.push(item);
+      }
+    }
+    return mismatched;
+  }
+
+  it('Should attempt to verify all the contracts against the first version of rocketpool, commit 67a64456397dc763b6831539221fdfb172d4335e', async function() {
+    // Verify that each contracts entry has a sources array comprised of dependencies _or_ v1.0.0 contracts.
+    const prefix = "rocketpool-67a644"; // Path prefix of submodule
+    var files = {}
+    // Read the files into memory
+    for (item of toVerify) {
+      if (files[item.path] == undefined) {
+        const path = `${prefix}${item.path}`
+        if (!fs.existsSync(path)) {
+          continue;
+        }
+        files[item.path] = fs.readFileSync(path).toString();
+      }
+    }
+    // Recreate toVerify with only the remaining unverified contracts
+    toVerify = getUnverified(toVerify, files);
+    debug(`${toVerify.length} items left to verify`);
+  });
+
+  it('Should attempt to verify all the contracts against the version 1.0.0 of rocketpool', async function() {
+    // Verify that each contracts entry has a sources array comprised of dependencies _or_ v1.0.0 contracts.
+    const prefix = "rocketpool-v1.0.0"; // Path prefix of submodule
+    var files = {}
+    // Read the files into memory
+    for (item of toVerify) {
+      if (files[item.path] == undefined) {
+        const path = `${prefix}${item.path}`
+        if (!fs.existsSync(path)) {
+          continue;
+        }
+        files[item.path] = fs.readFileSync(path).toString();
+      }
+    }
+    // Recreate toVerify with only the remaining unverified contracts
+    toVerify = getUnverified(toVerify, files);
+    debug(`${toVerify.length} items left to verify`);
+  });
+
+  it('Should have verified all the smart contracts', function() {
+    if (toVerify.length > 0) {
+      debug(toVerify.map(item => [item.path, item.addr]));
+    }
+    assert.deepStrictEqual(toVerify, []);
   });
 
   after(async function() {
