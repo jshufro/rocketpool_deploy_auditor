@@ -1,6 +1,6 @@
-[submodule "rocketpool"]
-	path = rocketpool-67a644
-	url = https://github.com/rocket-pool/rocketpool.git
 [submodule "rocketpool-v1.0.0"]
 	path = rocketpool-v1.0.0
+	url = https://github.com/rocket-pool/rocketpool.git
+[submodule "rocketpool-v1.0.0-pre"]
+	path = rocketpool-v1.0.0-pre
 	url = https://github.com/rocket-pool/rocketpool.git

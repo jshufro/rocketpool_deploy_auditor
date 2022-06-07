@@ -241,14 +241,10 @@ describe("Audit", function() {
     var contracts = [];
     for (addr of addrs) {
 
-      if (["0x6a032a901f17227b4db52937fb25f2523a529760"].includes(addr)) {
-        debug(`Skipping ${addr}`);
-        continue; //TODO Why is the source code different? 72 hours vs 5760 blocks in RocketDAOProtocolSettingsMinipool
-      }
-
+      // Skip the Old RPL token contract, which isn't very interesting
       if (["0xb4efd85c19999d84251304bda99e90b92300bd93"].includes(addr)) {
         debug(`Skipping ${addr}`);
-        continue; //TODO Whither the OldRPL source? Do we care?
+        continue;
       }
 
       contracts.push({ 'addr': addr, 'resp': await getContractCode(addr)});
@@ -303,9 +299,9 @@ describe("Audit", function() {
     return mismatched;
   }
 
-  it('Should attempt to verify all the contracts against the first version of rocketpool, commit 67a64456397dc763b6831539221fdfb172d4335e', async function() {
+  it('Should attempt to verify all the contracts against the version v1.0.0-pre', async function() {
     // Verify that each contracts entry has a sources array comprised of dependencies _or_ v1.0.0 contracts.
-    const prefix = "rocketpool-67a644"; // Path prefix of submodule
+    const prefix = "rocketpool-v1.0.0-pre"; // Path prefix of submodule
     var files = {}
     // Read the files into memory
     for (item of toVerify) {
@@ -322,7 +318,7 @@ describe("Audit", function() {
     debug(`${toVerify.length} items left to verify`);
   });
 
-  it('Should attempt to verify all the contracts against the version 1.0.0 of rocketpool', async function() {
+  it('Should attempt to verify all the contracts against the version v1.0.0 of rocketpool', async function() {
     // Verify that each contracts entry has a sources array comprised of dependencies _or_ v1.0.0 contracts.
     const prefix = "rocketpool-v1.0.0"; // Path prefix of submodule
     var files = {}
